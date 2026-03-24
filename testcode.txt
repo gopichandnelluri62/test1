@@ -1,0 +1,165 @@
+function () {
+
+  /* ================= HELPERS ================= */
+
+  function txt(el){
+    try {
+      return el ? (el.innerText || el.textContent || '').trim() : '';
+    } catch(e){
+      return '';
+    }
+  }
+
+  function pad2(v){ return (v < 10 ? '0' : '') + v; }
+
+  function nowStamp(){
+    var d = new Date();
+    return d.getFullYear() + '-' +
+      pad2(d.getMonth() + 1) + '-' +
+      pad2(d.getDate()) + '_' +
+      pad2(d.getHours()) + '-' +
+      pad2(d.getMinutes()) + '-' +
+      pad2(d.getSeconds());
+  }
+
+  function xmlEsc(v){
+    return String(v == null ? '' : v)
+      .replace(/&/g,'&amp;')
+      .replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;')
+      .replace(/'/g,'&apos;');
+  }
+
+  /* ================= SELECTORS ================= */
+
+  var BODY_SEL   = '.qa-grid-body.form-scroll';
+  var ROW_SEL    = '.qa-grid-row';
+  var CELL_SEL   = '[data-key]';
+  var HDR_SEL    = '[data-column-key]';
+  var HDR_LABEL  = '.qa-grid-filter-label';
+  var TOT_PAGES  = '.qa-total-grid-pages';
+  var SUMMARY    = '.page-summary__indexDark__QseBEKeJlda9RL8H8Lx7';
+
+  var body = document.querySelector(BODY_SEL);
+  if(!body) return;
+
+  /* ================= RESULT OBJECT ================= */
+
+  var result = {
+    status: 'success',
+    pages_found: 0,
+    record_count: 0,
+    record_count_ui: 0,
+    record_count_extracted: 0,
+    error_messge: '',
+    file_name: ''
+  };
+
+  function recordCountUI(){
+    var s = document.querySelector(SUMMARY);
+    if(!s) return 0;
+    var m = txt(s).match(/of\s+(\d+)/i);
+    return m ? parseInt(m[1],10) : 0;
+  }
+
+  function totalPages(){
+    var t = document.querySelector(TOT_PAGES);
+    return t ? parseInt(t.textContent,10) : 1;
+  }
+
+  result.record_count_ui = recordCountUI();
+  result.pages_found = totalPages();
+
+  /* ================= VIEWPORT ================= */
+
+  function rowInView(row){
+    if(!row || !row.getBoundingClientRect) return false;
+    var r = row.getBoundingClientRect();
+    var b = body.getBoundingClientRect();
+    return r.bottom > b.top && r.top < b.bottom;
+  }
+
+  /* ================= HEADERS ================= */
+
+  var headers = [];
+  var keys = [];
+
+  (function discoverHeaders(){
+    var rows=document.querySelectorAll(ROW_SEL);
+    for(var i=0;i<rows.length;i++){
+      if(rowInView(rows[i])){
+        var cs=rows[i].querySelectorAll(CELL_SEL);
+        for(var j=0;j<cs.length;j++){
+          keys.push(cs[j].getAttribute('data-key')||'');
+        }
+        break;
+      }
+    }
+    var hs=document.querySelectorAll(HDR_SEL);
+    for(var h=0;h<hs.length;h++){
+      var l=hs[h].querySelector(HDR_LABEL)||hs[h];
+      headers.push(txt(l));
+    }
+  })();
+
+  var dataRows=[headers];
+  var seen={};
+
+  function collectRows(){
+    var rows=document.querySelectorAll(ROW_SEL);
+    for(var r=0;r<rows.length;r++){
+      if(!rowInView(rows[r])) continue;
+      var id=rows[r].getAttribute('data-id')||r;
+      if(seen[id]) continue;
+      seen[id]=true;
+      var vals=[];
+      var cs=rows[r].querySelectorAll(CELL_SEL);
+      for(var c=0;c<keys.length;c++){
+        var el=cs[c]?(cs[c].querySelector('a,span')||cs[c]):null;
+        vals.push(txt(el));
+      }
+      dataRows.push(vals);
+    }
+  }
+
+  var pageCount=result.pages_found;
+  for(var p=0;p<pageCount;p++){
+    collectRows();
+    var next=document.querySelector('i.material-icons[aria-hidden=true]');
+    if(next && txt(next)==='chevron_right' && next.parentNode){
+      next.parentNode.click();
+    }
+  }
+
+  result.record_count_extracted=dataRows.length-1;
+  result.record_count=result.record_count_extracted;
+
+  var ts=nowStamp();
+  var fileName='matters_export_'+ts+'.xls';
+
+  function buildSheet(name, rows){
+    return '<Worksheet ss:Name=\''+xmlEsc(name)+'\'><Table>' +
+      rows.map(function(r){
+        return '<Row>'+r.map(function(c){
+          return '<Cell><Data ss:Type=\'String\'>'+xmlEsc(c)+'</Data></Cell>';
+        }).join('')+'</Row>';
+      }).join('') +
+      '</Table></Worksheet>';
+  }
+
+  var xml =
+    '<?xml version=\'1.0\'?>' +
+    '<Workbook xmlns=\'urn:schemas-microsoft-com:office:spreadsheet\' ' +
+    'xmlns:ss=\'urn:schemas-microsoft-com:office:spreadsheet\'>' +
+    buildSheet('Matter data',dataRows) +
+    '</Workbook>';
+
+  var blob=new Blob([xml],{type:'application/vnd.ms-excel'});
+  var a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=fileName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+``
