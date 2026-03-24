@@ -1,4 +1,4 @@
-function () {
+"function () {
   /* ================= HELPERS ================= */
   function txt(el) { return el ? (el.innerText || '').trim() : ''; }
 
@@ -172,3 +172,4 @@ function () {
   // This returns the filename to the UiPath Output variable
   return result.file_name;
 }
+"
