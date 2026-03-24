@@ -1,6 +1,6 @@
-"function () {
+function () {
   /* ================= HELPERS ================= */
-  function txt(el) { return el ? (el.innerText || '').trim() : ''; }
+  function txt(el) { return el ? (el.innerText || el.textContent || '').trim() : ''; }
 
   function pad2(v) { return (v < 10 ? '0' : '') + v; }
 
@@ -38,10 +38,8 @@
   var result = {
     status: 'success',
     pages_found: 0,
-    record_count: 0,
     record_count_ui: 0,
     record_count_extracted: 0,
-    error_message: '',
     file_name: ''
   };
 
@@ -60,25 +58,16 @@
   result.record_count_ui = recordCountUI();
   result.pages_found = totalPages();
 
-  /* ================= VIEWPORT ================= */
-  function rowInView(row) {
-    var r = row.getBoundingClientRect();
-    var b = body.getBoundingClientRect();
-    return r.bottom > b.top && r.top < b.bottom;
-  }
-
   /* ================= HEADERS & KEYS ================= */
   var headers = [];
   var keys = [];
 
-  var rows = document.querySelectorAll(ROW_SEL);
-  for (var i = 0; i < rows.length; i++) {
-    if (rowInView(rows[i])) {
-      var cs = rows[i].querySelectorAll(CELL_SEL);
-      for (var j = 0; j < cs.length; j++) {
-        keys.push(cs[j].getAttribute('data-key') || '');
-      }
-      break;
+  // Capture keys from the first available row regardless of visibility
+  var firstRow = document.querySelector(ROW_SEL);
+  if (firstRow) {
+    var cs = firstRow.querySelectorAll(CELL_SEL);
+    for (var j = 0; j < cs.length; j++) {
+      keys.push(cs[j].getAttribute('data-key') || '');
     }
   }
   
@@ -94,10 +83,12 @@
   function collectRows() {
     var currentRows = document.querySelectorAll(ROW_SEL);
     for (var r = 0; r < currentRows.length; r++) {
-      if (!rowInView(currentRows[r])) continue;
-      var id = currentRows[r].getAttribute('data-id') || (txt(currentRows[r]) + r);
-      if (seen[id]) continue;
-      seen[id] = true;
+      // Create a unique ID based on data-id attribute OR row content string
+      var rowId = currentRows[r].getAttribute('data-id') || currentRows[r].innerText.replace(/\s/g, '');
+      
+      if (seen[rowId]) continue;
+      seen[rowId] = true;
+
       var vals = [];
       var cells = currentRows[r].querySelectorAll(CELL_SEL);
       for (var c = 0; c < keys.length; c++) {
@@ -110,22 +101,29 @@
 
   /* ================= PAGINATION LOOP ================= */
   for (var p = 0; p < result.pages_found; p++) {
+    // 1. Collect all rows currently in the DOM
     collectRows();
     
+    // 2. Click next if needed
     if (p < result.pages_found - 1) {
       var next = document.querySelector('i.material-icons[aria-hidden=true]');
-      if (next && txt(next) === 'chevron_right') {
-        next.parentNode.click();
-        
-        // Synchronous sleep to let the grid refresh
+      // Finding the specific chevron_right icon
+      var icons = document.querySelectorAll('i.material-icons');
+      var btn = null;
+      for(var i=0; i<icons.length; i++){
+          if(txt(icons[i]) === 'chevron_right') { btn = icons[i].parentNode; break; }
+      }
+
+      if (btn) {
+        btn.click();
+        // Pause to allow AJAX/Network request to update the grid
         var start = new Date().getTime();
-        while (new Date().getTime() < start + 1200) { /* pause execution */ }
+        while (new Date().getTime() < start + 1500) { /* wait */ }
       }
     }
   }
 
   result.record_count_extracted = dataRows.length - 1;
-  result.record_count = result.record_count_extracted;
 
   var ts = nowStamp();
   var fileName = 'matters_export_' + ts + '.xls';
@@ -148,7 +146,6 @@
     ['key', 'value'],
     ['status', result.status],
     ['pages_found', '' + result.pages_found],
-    ['record_count', '' + result.record_count],
     ['record_count_ui', '' + result.record_count_ui],
     ['record_count_extracted', '' + result.record_count_extracted],
     ['file_name', result.file_name]
@@ -169,7 +166,5 @@
   a.click();
   a.remove();
 
-  // This returns the filename to the UiPath Output variable
   return result.file_name;
 }
-"
