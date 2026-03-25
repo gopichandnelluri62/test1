@@ -1,131 +1,105 @@
-function (element, fileName) {
-  /* ================= HELPERS ================= */
-  var txt = function(el) { return el ? (el.innerText || el.textContent || '').trim() : ''; };
-  
-  var xmlEsc = function(v) {
-    return String(v == null ? '' : v)
-      .replace(new RegExp('&', 'g'), '&amp;')
-      .replace(new RegExp('<', 'g'), '&lt;')
-      .replace(new RegExp('>', 'g'), '&gt;')
-      .replace(new RegExp("'", 'g'), '&apos;');
-  };
-
-  /* ================= SELECTORS ================= */
-  var ROW_SEL    = '.qa-grid-row';
-  var CELL_SEL   = '[data-key]';
-  var HDR_SEL    = '[data-column-key]';
-  var HDR_LABEL  = '.qa-grid-filter-label';
-  var TOT_PAGES  = '.qa-total-grid-pages';
-
-  var tElem = document.querySelector(TOT_PAGES);
-  var totalPages = tElem ? parseInt(tElem.textContent, 10) : 1;
-  if (isNaN(totalPages) || totalPages < 1) totalPages = 1;
-
-  /* ================= DATA CONTAINERS ================= */
-  var headers = [];
-  var keys = [];
-  var dataRows = [];
-  var seen = {};
-
-  // Capture Keys and Headers from the first page
-  var firstRow = document.querySelector(ROW_SEL);
-  if (firstRow) {
-    var cs = firstRow.querySelectorAll(CELL_SEL);
-    for (var j = 0; j < cs.length; j++) {
-      keys.push(cs[j].getAttribute('data-key') || '');
+function(element, fileName) {
+    /* ================= HELPERS ================= */
+    function txt(el) { return el ? (el.innerText || el.textContent || '').trim() : ''; }
+    function xmlEsc(v) {
+        return String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/'/g, '&apos;');
     }
-  }
-  
-  var hs = document.querySelectorAll(HDR_SEL);
-  for (var h = 0; h < hs.length; h++) {
-    var l = hs[h].querySelector(HDR_LABEL) || hs[h];
-    headers.push(txt(l));
-  }
-  dataRows.push(headers);
 
-  /* ================= MASTER LOOP ================= */
-  for (var p = 0; p < totalPages; p++) {
-    
-    // 1. Capture the "Signature" of the current page to detect change later
-    var topRow = document.querySelector(ROW_SEL);
-    var oldId = topRow ? (topRow.getAttribute('data-id') || topRow.innerText) : '';
+    var BODY_SEL   = '.qa-grid-body.form-scroll';
+    var ROW_SEL    = '.qa-grid-row';
+    var CELL_SEL   = '[data-key]';
+    var HDR_SEL    = '[data-column-key]';
+    var HDR_LABEL  = '.qa-grid-filter-label';
+    var TOT_PAGES  = '.qa-total-grid-pages';
 
-    // 2. COLLECT: Try to find records. If none, wait 15s and retry up to 10 times.
-    var capturedThisPage = false;
-    for (var attempt = 0; attempt < 10; attempt++) {
-      var currentRows = document.querySelectorAll(ROW_SEL);
-      
-      if (currentRows.length > 0) {
+    var tElem = document.querySelector(TOT_PAGES);
+    var totalPages = tElem ? parseInt(tElem.textContent, 10) : 1;
+    if (isNaN(totalPages) || totalPages < 1) totalPages = 1;
+
+    var headers = [];
+    var keys = [];
+    var dataRows = [];
+    var seen = {};
+    var currentPage = 0;
+
+    // Initialize Headers
+    var firstRow = document.querySelector(ROW_SEL);
+    if (firstRow) {
+        var cs = firstRow.querySelectorAll(CELL_SEL);
+        for (var j = 0; j < cs.length; j++) { keys.push(cs[j].getAttribute('data-key') || ''); }
+    }
+    var hs = document.querySelectorAll(HDR_SEL);
+    for (var h = 0; h < hs.length; h++) {
+        var l = hs[h].querySelector(HDR_LABEL) || hs[h];
+        headers.push(txt(l));
+    }
+    dataRows.push(headers);
+
+    /* ================= THE RECURSIVE ENGINE ================= */
+    function processPage() {
+        // 1. Collect Data from current view
+        var currentRows = document.querySelectorAll(ROW_SEL);
         for (var r = 0; r < currentRows.length; r++) {
-          var rowId = currentRows[r].getAttribute('data-id') || (txt(currentRows[r]) + r);
-          if (seen[rowId]) continue;
-          seen[rowId] = true;
+            var rowId = currentRows[r].getAttribute('data-id') || (txt(currentRows[r]) + r);
+            if (seen[rowId]) continue;
+            seen[rowId] = true;
 
-          var vals = [];
-          var cells = currentRows[r].querySelectorAll(CELL_SEL);
-          for (var c = 0; c < keys.length; c++) {
-            var el = cells[c] ? (cells[c].querySelector('a,span') || cells[c]) : null;
-            vals.push(txt(el));
-          }
-          dataRows.push(vals);
+            var vals = [];
+            var cells = currentRows[r].querySelectorAll(CELL_SEL);
+            for (var c = 0; c < keys.length; c++) {
+                var el = cells[c] ? (cells[c].querySelector('a,span') || cells[c]) : null;
+                vals.push(txt(el));
+            }
+            dataRows.push(vals);
         }
-        capturedThisPage = true;
-        break; 
-      } else {
-        // Hard wait 15 seconds if no records found
-        var s1 = new Date().getTime();
-        while (new Date().getTime() < s1 + 15000) {}
-      }
-    }
 
-    // 3. PAGINATE: Only click if there is a next page
-    if (p < totalPages - 1) {
-      var icons = document.querySelectorAll('i.material-icons');
-      var btn = null;
-      for (var i = 0; i < icons.length; i++) {
-        if (txt(icons[i]) === 'chevron_right') { btn = icons[i].parentNode; break; }
-      }
+        // 2. Check if we need to go to next page
+        currentPage++;
+        if (currentPage < totalPages) {
+            var btn = null;
+            var icons = document.querySelectorAll('i.material-icons');
+            for (var i = 0; i < icons.length; i++) {
+                if (txt(icons[i]) === 'chevron_right') { btn = icons[i].parentNode; break; }
+            }
 
-      if (btn) {
-        btn.click();
-        
-        // 4. WAIT FOR CHANGE: Block until the first row is different from oldId
-        var s2 = new Date().getTime();
-        while (new Date().getTime() < s2 + 15000) {
-          var nextTop = document.querySelector(ROW_SEL);
-          var nextId = nextTop ? (nextTop.getAttribute('data-id') || nextTop.innerText) : '';
-          if (nextId !== oldId && nextId !== '') {
-            // Buffer to let the rest of the rows paint
-            var s3 = new Date().getTime();
-            while (new Date().getTime() < s3 + 1000) {}
-            break; 
-          }
+            if (btn) {
+                btn.click();
+                // Wait 3 seconds, then run the function again for the next page
+                setTimeout(processPage, 3000); 
+            } else {
+                finishAndDownload();
+            }
+        } else {
+            finishAndDownload();
         }
-      }
     }
-  }
 
-  /* ================= BUILD EXCEL ================= */
-  var rowsXml = '';
-  for (var x = 0; x < dataRows.length; x++) {
-    rowsXml += '<Row>';
-    for (var y = 0; y < dataRows[x].length; y++) {
-      rowsXml += '<Cell><Data ss:Type=\'String\'>' + xmlEsc(dataRows[x][y]) + '</Data></Cell>';
+    function finishAndDownload() {
+        var rowsXml = '';
+        for (var x = 0; x < dataRows.length; x++) {
+            rowsXml += '<Row>';
+            for (var y = 0; y < dataRows[x].length; y++) {
+                rowsXml += '<Cell><Data ss:Type=\'String\'>' + xmlEsc(dataRows[x][y]) + '</Data></Cell>';
+            }
+            rowsXml += '</Row>';
+        }
+
+        var xml = '<?xml version=\'1.0\'?>' +
+            '<Workbook xmlns=\'urn:schemas-microsoft-com:office:spreadsheet\' xmlns:ss=\'urn:schemas-microsoft-com:office:spreadsheet\'>' +
+            '<Worksheet ss:Name=\'Data\'><Table>' + rowsXml + '</Table></Worksheet></Workbook>';
+
+        var blob = new Blob([xml], { type: 'application/vnd.ms-excel' });
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        console.log("Download complete for " + totalPages + " pages.");
     }
-    rowsXml += '</Row>';
-  }
 
-  var xml = '<?xml version=\'1.0\'?>' +
-    '<Workbook xmlns=\'urn:schemas-microsoft-com:office:spreadsheet\' xmlns:ss=\'urn:schemas-microsoft-com:office:spreadsheet\'>' +
-    '<Worksheet ss:Name=\'Data\'><Table>' + rowsXml + '</Table></Worksheet></Workbook>';
+    // Start the first iteration
+    processPage();
 
-  var blob = new Blob([xml], { type: 'application/vnd.ms-excel' });
-  var a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = fileName;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-
-  return fileName;
+    return "Process started. Downloading will happen in the background.";
 }
