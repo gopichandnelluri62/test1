@@ -1,68 +1,33 @@
-"function () {
+function (element, fileName) {
   /* ================= HELPERS ================= */
-  function txt(el) { return el ? (el.innerText || el.textContent || '').trim() : ''; }
-
-  function pad2(v) { return (v < 10 ? '0' : '') + v; }
-
-  function nowStamp() {
-    var d = new Date();
-    return d.getFullYear() + '-' +
-      pad2(d.getMonth() + 1) + '-' +
-      pad2(d.getDate()) + '_' +
-      pad2(d.getHours()) + '-' +
-      pad2(d.getMinutes()) + '-' +
-      pad2(d.getSeconds());
-  }
-
-  function xmlEsc(v) {
+  var txt = function(el) { return el ? (el.innerText || el.textContent || '').trim() : ''; };
+  
+  var xmlEsc = function(v) {
     return String(v == null ? '' : v)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/'/g, '&apos;');
-  }
+      .replace(new RegExp('&', 'g'), '&amp;')
+      .replace(new RegExp('<', 'g'), '&lt;')
+      .replace(new RegExp('>', 'g'), '&gt;')
+      .replace(new RegExp("'", 'g'), '&apos;');
+  };
 
   /* ================= SELECTORS ================= */
-  var BODY_SEL   = '.qa-grid-body.form-scroll';
   var ROW_SEL    = '.qa-grid-row';
   var CELL_SEL   = '[data-key]';
   var HDR_SEL    = '[data-column-key]';
   var HDR_LABEL  = '.qa-grid-filter-label';
   var TOT_PAGES  = '.qa-total-grid-pages';
-  var SUMMARY    = '.page-summary__indexDark__QseBEKeJlda9RL8H8Lx7';
 
-  var body = document.querySelector(BODY_SEL);
-  if (!body) return 'Error: Grid body not found';
+  var tElem = document.querySelector(TOT_PAGES);
+  var totalPages = tElem ? parseInt(tElem.textContent, 10) : 1;
+  if (isNaN(totalPages) || totalPages < 1) totalPages = 1;
 
-  /* ================= RESULT OBJECT ================= */
-  var result = {
-    status: 'success',
-    pages_found: 0,
-    record_count_ui: 0,
-    record_count_extracted: 0,
-    file_name: ''
-  };
-
-  function recordCountUI() {
-    var s = document.querySelector(SUMMARY);
-    if (!s) return 0;
-    var m = txt(s).match(/of\s+(\d+)/i);
-    return m ? parseInt(m[1], 10) : 0;
-  }
-
-  function totalPages() {
-    var t = document.querySelector(TOT_PAGES);
-    return t ? parseInt(t.textContent, 10) : 1;
-  }
-
-  result.record_count_ui = recordCountUI();
-  result.pages_found = totalPages();
-
-  /* ================= HEADERS & KEYS ================= */
+  /* ================= DATA CONTAINERS ================= */
   var headers = [];
   var keys = [];
+  var dataRows = [];
+  var seen = {};
 
-  // Capture keys from the first available row regardless of visibility
+  // Capture Keys and Headers from the first page
   var firstRow = document.querySelector(ROW_SEL);
   if (firstRow) {
     var cs = firstRow.querySelectorAll(CELL_SEL);
@@ -76,87 +41,83 @@
     var l = hs[h].querySelector(HDR_LABEL) || hs[h];
     headers.push(txt(l));
   }
+  dataRows.push(headers);
 
-  var dataRows = [headers];
-  var seen = {};
-
-  function collectRows() {
-    var currentRows = document.querySelectorAll(ROW_SEL);
-    for (var r = 0; r < currentRows.length; r++) {
-      // Create a unique ID based on data-id attribute OR row content string
-      var rowId = currentRows[r].getAttribute('data-id') || currentRows[r].innerText.replace(/\s/g, '');
-      
-      if (seen[rowId]) continue;
-      seen[rowId] = true;
-
-      var vals = [];
-      var cells = currentRows[r].querySelectorAll(CELL_SEL);
-      for (var c = 0; c < keys.length; c++) {
-        var el = cells[c] ? (cells[c].querySelector('a,span') || cells[c]) : null;
-        vals.push(txt(el));
-      }
-      dataRows.push(vals);
-    }
-  }
-
-  /* ================= PAGINATION LOOP ================= */
-  for (var p = 0; p < result.pages_found; p++) {
-    // 1. Collect all rows currently in the DOM
-    collectRows();
+  /* ================= MASTER LOOP ================= */
+  for (var p = 0; p < totalPages; p++) {
     
-    // 2. Click next if needed
-    if (p < result.pages_found - 1) {
-      var next = document.querySelector('i.material-icons[aria-hidden=true]');
-      // Finding the specific chevron_right icon
+    // 1. Capture the "Signature" of the current page to detect change later
+    var topRow = document.querySelector(ROW_SEL);
+    var oldId = topRow ? (topRow.getAttribute('data-id') || topRow.innerText) : '';
+
+    // 2. COLLECT: Try to find records. If none, wait 15s and retry up to 10 times.
+    var capturedThisPage = false;
+    for (var attempt = 0; attempt < 10; attempt++) {
+      var currentRows = document.querySelectorAll(ROW_SEL);
+      
+      if (currentRows.length > 0) {
+        for (var r = 0; r < currentRows.length; r++) {
+          var rowId = currentRows[r].getAttribute('data-id') || (txt(currentRows[r]) + r);
+          if (seen[rowId]) continue;
+          seen[rowId] = true;
+
+          var vals = [];
+          var cells = currentRows[r].querySelectorAll(CELL_SEL);
+          for (var c = 0; c < keys.length; c++) {
+            var el = cells[c] ? (cells[c].querySelector('a,span') || cells[c]) : null;
+            vals.push(txt(el));
+          }
+          dataRows.push(vals);
+        }
+        capturedThisPage = true;
+        break; 
+      } else {
+        // Hard wait 15 seconds if no records found
+        var s1 = new Date().getTime();
+        while (new Date().getTime() < s1 + 15000) {}
+      }
+    }
+
+    // 3. PAGINATE: Only click if there is a next page
+    if (p < totalPages - 1) {
       var icons = document.querySelectorAll('i.material-icons');
       var btn = null;
-      for(var i=0; i<icons.length; i++){
-          if(txt(icons[i]) === 'chevron_right') { btn = icons[i].parentNode; break; }
+      for (var i = 0; i < icons.length; i++) {
+        if (txt(icons[i]) === 'chevron_right') { btn = icons[i].parentNode; break; }
       }
 
       if (btn) {
         btn.click();
-        // Pause to allow AJAX/Network request to update the grid
-        var start = new Date().getTime();
-        while (new Date().getTime() < start + 1500) { /* wait */ }
+        
+        // 4. WAIT FOR CHANGE: Block until the first row is different from oldId
+        var s2 = new Date().getTime();
+        while (new Date().getTime() < s2 + 15000) {
+          var nextTop = document.querySelector(ROW_SEL);
+          var nextId = nextTop ? (nextTop.getAttribute('data-id') || nextTop.innerText) : '';
+          if (nextId !== oldId && nextId !== '') {
+            // Buffer to let the rest of the rows paint
+            var s3 = new Date().getTime();
+            while (new Date().getTime() < s3 + 1000) {}
+            break; 
+          }
+        }
       }
     }
   }
-
-  result.record_count_extracted = dataRows.length - 1;
-
-  var ts = nowStamp();
-  var fileName = 'matters_export_' + ts + '.xls';
-  result.file_name = fileName;
 
   /* ================= BUILD EXCEL ================= */
-  function buildSheet(name, rowsArr) {
-    var rowsXml = '';
-    for (var x = 0; x < rowsArr.length; x++) {
-      rowsXml += '<Row>';
-      for (var y = 0; y < rowsArr[x].length; y++) {
-        rowsXml += '<Cell><Data ss:Type=\'String\'>' + xmlEsc(rowsArr[x][y]) + '</Data></Cell>';
-      }
-      rowsXml += '</Row>';
+  var rowsXml = '';
+  for (var x = 0; x < dataRows.length; x++) {
+    rowsXml += '<Row>';
+    for (var y = 0; y < dataRows[x].length; y++) {
+      rowsXml += '<Cell><Data ss:Type=\'String\'>' + xmlEsc(dataRows[x][y]) + '</Data></Cell>';
     }
-    return '<Worksheet ss:Name=\'' + xmlEsc(name) + '\'><Table>' + rowsXml + '</Table></Worksheet>';
+    rowsXml += '</Row>';
   }
 
-  var resultSheetRows = [
-    ['key', 'value'],
-    ['status', result.status],
-    ['pages_found', '' + result.pages_found],
-    ['record_count_ui', '' + result.record_count_ui],
-    ['record_count_extracted', '' + result.record_count_extracted],
-    ['file_name', result.file_name]
-  ];
-
   var xml = '<?xml version=\'1.0\'?>' +
-    '<Workbook xmlns=\'urn:schemas-microsoft-com:office:spreadsheet\' ' +
-    'xmlns:ss=\'urn:schemas-microsoft-com:office:spreadsheet\'>' +
-    buildSheet('Matter data', dataRows) +
-    buildSheet('Result', resultSheetRows) +
-    '</Workbook>';
+    '<Workbook xmlns=\'urn:schemas-microsoft-com:office:spreadsheet\' xmlns:ss=\'urn:schemas-microsoft-com:office:spreadsheet\'>' +
+    '<Worksheet ss:Name=\'Data\'><Table>' + rowsXml + '</Table></Worksheet></Workbook>';
 
   var blob = new Blob([xml], { type: 'application/vnd.ms-excel' });
   var a = document.createElement('a');
@@ -166,6 +127,5 @@
   a.click();
   a.remove();
 
-  return result.file_name;
+  return fileName;
 }
-"
