@@ -22,11 +22,10 @@ function () {
   var body = document.querySelector(BODY_SEL);
   if (!body) return 'Error: Grid body not found';
 
-  var totalPages = (function() {
-    var t = document.querySelector(TOT_PAGES);
-    var val = t ? parseInt(t.textContent, 10) : 1;
-    return isNaN(val) ? 1 : val;
-  })();
+  // Get total pages safely
+  var tElem = document.querySelector(TOT_PAGES);
+  var totalPages = tElem ? parseInt(tElem.textContent, 10) : 1;
+  if (isNaN(totalPages)) totalPages = 1;
 
   /* ================= DATA CONTAINERS ================= */
   var headers = [];
@@ -34,11 +33,13 @@ function () {
   var dataRows = [];
   var seen = {};
 
-  // Initialize Headers
+  // Initialize Headers and Keys
   var firstRow = document.querySelector(ROW_SEL);
   if (firstRow) {
     var cs = firstRow.querySelectorAll(CELL_SEL);
-    for (var j = 0; j < cs.length; j++) { keys.push(cs[j].getAttribute('data-key') || ''); }
+    for (var j = 0; j < cs.length; j++) { 
+      keys.push(cs[j].getAttribute('data-key') || ''); 
+    }
   }
   var hs = document.querySelectorAll(HDR_SEL);
   for (var h = 0; h < hs.length; h++) {
@@ -48,14 +49,15 @@ function () {
 
   /* ================= EXTRACTION ENGINE ================= */
   for (var p = 0; p < totalPages; p++) {
-    // 1. Capture the "Signature" of the current top row to know when the page actually changes
+    
+    // 1. Capture current "Page Signature" (the first row's ID)
     var topRowBefore = document.querySelector(ROW_SEL);
-    var topRowIdBefore = topRowBefore ? (topRowBefore.getAttribute('data-id') || topRowBefore.innerText) : '';
+    var topRowIdBefore = topRowBefore ? (topRowBefore.getAttribute('data-id') || topRowBefore.innerText) : 'empty';
 
-    // 2. Collect all rows currently on this page
+    // 2. Collect all rows currently on the page
     var currentRows = document.querySelectorAll(ROW_SEL);
     for (var r = 0; r < currentRows.length; r++) {
-      var rowId = currentRows[r].getAttribute('data-id') || currentRows[r].innerText.replace(/\s/g, '');
+      var rowId = currentRows[r].getAttribute('data-id') || (txt(currentRows[r]) + r);
       if (seen[rowId]) continue;
       seen[rowId] = true;
 
@@ -68,38 +70,42 @@ function () {
       dataRows.push(vals);
     }
 
-    // 3. Handle Navigation
+    // 3. Navigate to next page if not at the end
     if (p < totalPages - 1) {
       var nextBtn = null;
       var icons = document.querySelectorAll('i.material-icons');
-      for(var i=0; i<icons.length; i++){
-        if(txt(icons[i]) === 'chevron_right') { nextBtn = icons[i].parentNode; break; }
+      for (var i = 0; i < icons.length; i++) {
+        if (txt(icons[i]) === 'chevron_right') { 
+          nextBtn = icons[i].parentNode; 
+          break; 
+        }
       }
 
       if (nextBtn) {
         nextBtn.click();
 
-        // 4. THE BLOCKING WAIT: Stay here until the top row changes or 5 seconds pass
+        // 4. BLOCKING SYNC: Wait for the top row to change
         var startWait = new Date().getTime();
         var pageChanged = false;
-        while (new Date().getTime() < startWait + 5000) { 
+        while (new Date().getTime() < startWait + 6000) { 
           var topRowAfter = document.querySelector(ROW_SEL);
-          var topRowIdAfter = topRowAfter ? (topRowAfter.getAttribute('data-id') || topRowAfter.innerText) : '';
+          var topRowIdAfter = topRowAfter ? (topRowAfter.getAttribute('data-id') || topRowAfter.innerText) : 'empty';
           
           if (topRowIdAfter !== topRowIdBefore) {
             pageChanged = true;
-            // Small extra buffer for UI stability
+            // Short stabilization pause
             var buffer = new Date().getTime();
-            while(new Date().getTime() < buffer + 300) {} 
+            while(new Date().getTime() < buffer + 500) {} 
             break; 
           }
         }
-        if (!pageChanged) { /* If it didn't change, we likely hit the end or a lag spike */ }
+      } else {
+        break; // No button found, exit loop
       }
     }
   }
 
-  /* ================= GENERATE FILE (Only once at the end) ================= */
+  /* ================= GENERATE FILE ================= */
   var ts = nowStamp();
   var fileName = 'matters_export_' + ts + '.xls';
 
