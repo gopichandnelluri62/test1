@@ -6,16 +6,15 @@ function(element, fileName) {
   }
 
   /* ================= SELECTORS ================= */
-  var ROW_SEL    = '.qa-grid-row';
-  var CELL_SEL   = '[data-key]';
-  var HDR_SEL    = '[data-column-key]';
-  var HDR_LABEL  = '.qa-grid-filter-label';
-  var TOT_PAGES  = '.qa-total-grid-pages';
+  var ROW_SEL = '.qa-grid-row';
+  var CELL_SEL = '[data-key]';
+  var HDR_SEL = '[data-column-key]';
+  var HDR_LABEL = '.qa-grid-filter-label';
+  var TOT_PAGES = '.qa-total-grid-pages';
 
-  // Get total pages immediately
   var tElem = document.querySelector(TOT_PAGES);
   var totalPages = tElem ? parseInt(tElem.textContent, 10) : 1;
-  if (isNaN(totalPages) || totalPages < 1) totalPages = 1;
+  if (isNaN(totalPages) || totalPages < 1) { totalPages = 1; }
 
   /* ================= DATA CONTAINERS ================= */
   var headers = [];
@@ -23,12 +22,11 @@ function(element, fileName) {
   var dataRows = [];
   var seen = {};
 
-  // Initialize Headers and Keys from the first page
   var firstRow = document.querySelector(ROW_SEL);
   if (firstRow) {
     var cs = firstRow.querySelectorAll(CELL_SEL);
     for (var j = 0; j < cs.length; j++) { 
-        keys.push(cs[j].getAttribute('data-key') || ''); 
+      keys.push(cs[j].getAttribute('data-key') || ''); 
     }
   }
   var hs = document.querySelectorAll(HDR_SEL);
@@ -38,19 +36,13 @@ function(element, fileName) {
   }
   dataRows.push(headers);
 
-  /* ================= MASTER EXTRACTION LOOP ================= */
+  /* ================= THE STABLE LOOP ================= */
   for (var p = 0; p < totalPages; p++) {
-    
-    // 1. Capture the unique ID of the top row BEFORE we click next
-    var topRowBefore = document.querySelector(ROW_SEL);
-    var topRowIdBefore = topRowBefore ? (topRowBefore.getAttribute('data-id') || topRowBefore.innerText) : 'empty';
-
-    // 2. SCRAPE: Collect all rows on the current page
+    // 1. Collect
     var currentRows = document.querySelectorAll(ROW_SEL);
     for (var r = 0; r < currentRows.length; r++) {
-      // Create a unique hash for the row to prevent duplicates
-      var rowId = currentRows[r].getAttribute('data-id') || (currentRows[r].innerText.replace(/\s/g, '') + r);
-      if (seen[rowId]) continue;
+      var rowId = currentRows[r].getAttribute('data-id') || (txt(currentRows[r]) + r);
+      if (seen[rowId]) { continue; }
       seen[rowId] = true;
       
       var vals = [];
@@ -62,45 +54,26 @@ function(element, fileName) {
       dataRows.push(vals);
     }
 
-    // 3. PAGINATE: Only if there are more pages left
+    // 2. Paginate
     if (p < totalPages - 1) {
-      var nextBtn = null;
+      var btn = null;
       var icons = document.querySelectorAll('i.material-icons');
       for (var i = 0; i < icons.length; i++) {
-        if (txt(icons[i]) === 'chevron_right') { 
-            nextBtn = icons[i].parentNode; 
-            break; 
-        }
+        if (txt(icons[i]) === 'chevron_right') { btn = icons[i].parentNode; break; }
       }
 
-      if (nextBtn) {
-        nextBtn.click();
-
-        // 4. THE 10-SECOND HARD WAIT + CHANGE DETECTION
+      if (btn) {
+        btn.click();
+        // STATIC 10 SECOND SYNC WAIT
         var startWait = new Date().getTime();
-        var dataChanged = false;
-
-        // We block the thread for up to 10 seconds
         while (new Date().getTime() < startWait + 10000) { 
-            // Every loop, check if the first row has changed yet
-            var currentTopRow = document.querySelector(ROW_SEL);
-            var currentTopId = currentTopRow ? (currentTopRow.getAttribute('data-id') || currentTopRow.innerText) : 'empty';
-            
-            if (currentTopId !== topRowIdBefore) {
-                dataChanged = true;
-                // Once data changes, we still wait a 1-second "buffer" to ensure 
-                // all rows in the grid are fully painted before continuing
-                var buffer = new Date().getTime();
-                while(new Date().getTime() < buffer + 1000) {}
-                break; 
-            }
+            // Blocking
         }
       }
     }
   }
 
-  /* ================= FILE GENERATION ================= */
-  // This section is now GUARANTEED to run only after the loop finishes all pages
+  /* ================= DOWNLOAD ================= */
   var rowsXml = '';
   for (var x = 0; x < dataRows.length; x++) {
     rowsXml += '<Row>';
@@ -112,7 +85,7 @@ function(element, fileName) {
 
   var xml = '<?xml version=\'1.0\'?>' +
     '<Workbook xmlns=\'urn:schemas-microsoft-com:office:spreadsheet\' xmlns:ss=\'urn:schemas-microsoft-com:office:spreadsheet\'>' +
-    '<Worksheet ss:Name=\'ExtractedData\'><Table>' + rowsXml + '</Table></Worksheet></Workbook>';
+    '<Worksheet ss:Name=\'Data\'><Table>' + rowsXml + '</Table></Worksheet></Workbook>';
 
   var blob = new Blob([xml], { type: 'application/vnd.ms-excel' });
   var a = document.createElement('a');
@@ -122,5 +95,5 @@ function(element, fileName) {
   a.click();
   a.remove();
 
-  // No return value needed as per your request
+  return 'Success';
 }
