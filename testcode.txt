@@ -16,45 +16,59 @@ function(element, fileName) {
   var totalPages = tElem ? parseInt(tElem.textContent, 10) : 1;
   if (isNaN(totalPages) || totalPages < 1) { totalPages = 1; }
 
-  /* ================= DATA CONTAINERS ================= */
-  var headers = [];
-  var keys = [];
   var dataRows = [];
   var seen = {};
+  var keys = [];
 
+  /* ================= 1. CAPTURE HEADERS ================= */
   var firstRow = document.querySelector(ROW_SEL);
   if (firstRow) {
     var cs = firstRow.querySelectorAll(CELL_SEL);
-    for (var j = 0; j < cs.length; j++) { 
-      keys.push(cs[j].getAttribute('data-key') || ''); 
-    }
+    for (var j = 0; j < cs.length; j++) { keys.push(cs[j].getAttribute('data-key') || ''); }
   }
   var hs = document.querySelectorAll(HDR_SEL);
+  var headerVals = [];
   for (var h = 0; h < hs.length; h++) {
-    var l = hs[h].querySelector(HDR_LABEL) || hs[h];
-    headers.push(txt(l));
+    headerVals.push(txt(hs[h].querySelector(HDR_LABEL) || hs[h]));
   }
-  dataRows.push(headers);
+  dataRows.push(headerVals);
 
-  /* ================= THE STABLE LOOP ================= */
+  /* ================= 2. MASTER PAGE LOOP ================= */
   for (var p = 0; p < totalPages; p++) {
-    // 1. Collect
-    var currentRows = document.querySelectorAll(ROW_SEL);
-    for (var r = 0; r < currentRows.length; r++) {
-      var rowId = currentRows[r].getAttribute('data-id') || (txt(currentRows[r]) + r);
-      if (seen[rowId]) { continue; }
-      seen[rowId] = true;
+    
+    var pageLoadSuccess = false;
+    var attempts = 0;
+
+    // --- PER-PAGE RETRY LOGIC (10 attempts x 15 seconds) ---
+    while (attempts < 10) {
+      var currentRows = document.querySelectorAll(ROW_SEL);
       
-      var vals = [];
-      var cells = currentRows[r].querySelectorAll(CELL_SEL);
-      for (var c = 0; c < keys.length; c++) {
-        var el = cells[c] ? (cells[c].querySelector('a,span') || cells[c]) : null;
-        vals.push(txt(el));
+      // Check if rows exist AND if they are actually new (by checking the first row's ID)
+      if (currentRows.length > 0) {
+        for (var r = 0; r < currentRows.length; r++) {
+          var rowId = currentRows[r].getAttribute('data-id') || (txt(currentRows[r]) + r);
+          if (seen[rowId]) continue; 
+          seen[rowId] = true;
+          
+          var vals = [];
+          var cells = currentRows[r].querySelectorAll(CELL_SEL);
+          for (var c = 0; c < keys.length; c++) {
+            var el = cells[c] ? (cells[c].querySelector('a,span') || cells[c]) : null;
+            vals.push(txt(el));
+          }
+          dataRows.push(vals);
+        }
+        pageLoadSuccess = true;
+        break; // Found data, move to navigation
+      } else {
+        // Data not rendered yet, wait 15 seconds
+        attempts++;
+        var startWait = new Date().getTime();
+        while (new Date().getTime() < startWait + 15000) { /* Hard Sync Block */ }
       }
-      dataRows.push(vals);
     }
 
-    // 2. Paginate
+    // --- 3. NAVIGATION (CLICK NEXT) ---
     if (p < totalPages - 1) {
       var btn = null;
       var icons = document.querySelectorAll('i.material-icons');
@@ -64,16 +78,16 @@ function(element, fileName) {
 
       if (btn) {
         btn.click();
-        // STATIC 10 SECOND SYNC WAIT
-        var startWait = new Date().getTime();
-        while (new Date().getTime() < startWait + 10000) { 
-            // Blocking
-        }
+        // Short 2s buffer to let the old rows clear before we start the next 15s check
+        var transition = new Date().getTime();
+        while (new Date().getTime() < transition + 2000) { }
+      } else {
+        break; // Button disappeared, stop loop
       }
     }
   }
 
-  /* ================= DOWNLOAD ================= */
+  /* ================= 4. FINAL DOWNLOAD (ONLY RUNS AFTER ALL PAGES) ================= */
   var rowsXml = '';
   for (var x = 0; x < dataRows.length; x++) {
     rowsXml += '<Row>';
@@ -95,5 +109,5 @@ function(element, fileName) {
   a.click();
   a.remove();
 
-  return 'Success';
+  return 'Success: Captured ' + (dataRows.length - 1) + ' rows.';
 }
