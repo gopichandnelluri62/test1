@@ -1,14 +1,25 @@
-function () {
+"function () {
   /* ================= HELPERS ================= */
   function txt(el) { return el ? (el.innerText || el.textContent || '').trim() : ''; }
+
   function pad2(v) { return (v < 10 ? '0' : '') + v; }
+
   function nowStamp() {
     var d = new Date();
-    return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) + '_' +
-           pad2(d.getHours()) + '-' + pad2(d.getMinutes()) + '-' + pad2(d.getSeconds());
+    return d.getFullYear() + '-' +
+      pad2(d.getMonth() + 1) + '-' +
+      pad2(d.getDate()) + '_' +
+      pad2(d.getHours()) + '-' +
+      pad2(d.getMinutes()) + '-' +
+      pad2(d.getSeconds());
   }
+
   function xmlEsc(v) {
-    return String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/'/g, '&apos;');
+    return String(v == null ? '' : v)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/'/g, '&apos;');
   }
 
   /* ================= SELECTORS ================= */
@@ -18,46 +29,63 @@ function () {
   var HDR_SEL    = '[data-column-key]';
   var HDR_LABEL  = '.qa-grid-filter-label';
   var TOT_PAGES  = '.qa-total-grid-pages';
+  var SUMMARY    = '.page-summary__indexDark__QseBEKeJlda9RL8H8Lx7';
 
   var body = document.querySelector(BODY_SEL);
   if (!body) return 'Error: Grid body not found';
 
-  // Get total pages safely
-  var tElem = document.querySelector(TOT_PAGES);
-  var totalPages = tElem ? parseInt(tElem.textContent, 10) : 1;
-  if (isNaN(totalPages)) totalPages = 1;
+  /* ================= RESULT OBJECT ================= */
+  var result = {
+    status: 'success',
+    pages_found: 0,
+    record_count_ui: 0,
+    record_count_extracted: 0,
+    file_name: ''
+  };
 
-  /* ================= DATA CONTAINERS ================= */
+  function recordCountUI() {
+    var s = document.querySelector(SUMMARY);
+    if (!s) return 0;
+    var m = txt(s).match(/of\s+(\d+)/i);
+    return m ? parseInt(m[1], 10) : 0;
+  }
+
+  function totalPages() {
+    var t = document.querySelector(TOT_PAGES);
+    return t ? parseInt(t.textContent, 10) : 1;
+  }
+
+  result.record_count_ui = recordCountUI();
+  result.pages_found = totalPages();
+
+  /* ================= HEADERS & KEYS ================= */
   var headers = [];
   var keys = [];
-  var dataRows = [];
-  var seen = {};
 
-  // Initialize Headers and Keys
+  // Capture keys from the first available row regardless of visibility
   var firstRow = document.querySelector(ROW_SEL);
   if (firstRow) {
     var cs = firstRow.querySelectorAll(CELL_SEL);
-    for (var j = 0; j < cs.length; j++) { 
-      keys.push(cs[j].getAttribute('data-key') || ''); 
+    for (var j = 0; j < cs.length; j++) {
+      keys.push(cs[j].getAttribute('data-key') || '');
     }
   }
+  
   var hs = document.querySelectorAll(HDR_SEL);
   for (var h = 0; h < hs.length; h++) {
-    headers.push(txt(hs[h].querySelector(HDR_LABEL) || hs[h]));
+    var l = hs[h].querySelector(HDR_LABEL) || hs[h];
+    headers.push(txt(l));
   }
-  dataRows.push(headers);
 
-  /* ================= EXTRACTION ENGINE ================= */
-  for (var p = 0; p < totalPages; p++) {
-    
-    // 1. Capture current "Page Signature" (the first row's ID)
-    var topRowBefore = document.querySelector(ROW_SEL);
-    var topRowIdBefore = topRowBefore ? (topRowBefore.getAttribute('data-id') || topRowBefore.innerText) : 'empty';
+  var dataRows = [headers];
+  var seen = {};
 
-    // 2. Collect all rows currently on the page
+  function collectRows() {
     var currentRows = document.querySelectorAll(ROW_SEL);
     for (var r = 0; r < currentRows.length; r++) {
-      var rowId = currentRows[r].getAttribute('data-id') || (txt(currentRows[r]) + r);
+      // Create a unique ID based on data-id attribute OR row content string
+      var rowId = currentRows[r].getAttribute('data-id') || currentRows[r].innerText.replace(/\s/g, '');
+      
       if (seen[rowId]) continue;
       seen[rowId] = true;
 
@@ -69,58 +97,66 @@ function () {
       }
       dataRows.push(vals);
     }
+  }
 
-    // 3. Navigate to next page if not at the end
-    if (p < totalPages - 1) {
-      var nextBtn = null;
+  /* ================= PAGINATION LOOP ================= */
+  for (var p = 0; p < result.pages_found; p++) {
+    // 1. Collect all rows currently in the DOM
+    collectRows();
+    
+    // 2. Click next if needed
+    if (p < result.pages_found - 1) {
+      var next = document.querySelector('i.material-icons[aria-hidden=true]');
+      // Finding the specific chevron_right icon
       var icons = document.querySelectorAll('i.material-icons');
-      for (var i = 0; i < icons.length; i++) {
-        if (txt(icons[i]) === 'chevron_right') { 
-          nextBtn = icons[i].parentNode; 
-          break; 
-        }
+      var btn = null;
+      for(var i=0; i<icons.length; i++){
+          if(txt(icons[i]) === 'chevron_right') { btn = icons[i].parentNode; break; }
       }
 
-      if (nextBtn) {
-        nextBtn.click();
-
-        // 4. BLOCKING SYNC: Wait for the top row to change
-        var startWait = new Date().getTime();
-        var pageChanged = false;
-        while (new Date().getTime() < startWait + 6000) { 
-          var topRowAfter = document.querySelector(ROW_SEL);
-          var topRowIdAfter = topRowAfter ? (topRowAfter.getAttribute('data-id') || topRowAfter.innerText) : 'empty';
-          
-          if (topRowIdAfter !== topRowIdBefore) {
-            pageChanged = true;
-            // Short stabilization pause
-            var buffer = new Date().getTime();
-            while(new Date().getTime() < buffer + 500) {} 
-            break; 
-          }
-        }
-      } else {
-        break; // No button found, exit loop
+      if (btn) {
+        btn.click();
+        // Pause to allow AJAX/Network request to update the grid
+        var start = new Date().getTime();
+        while (new Date().getTime() < start + 1500) { /* wait */ }
       }
     }
   }
 
-  /* ================= GENERATE FILE ================= */
+  result.record_count_extracted = dataRows.length - 1;
+
   var ts = nowStamp();
   var fileName = 'matters_export_' + ts + '.xls';
+  result.file_name = fileName;
+
+  /* ================= BUILD EXCEL ================= */
+  function buildSheet(name, rowsArr) {
+    var rowsXml = '';
+    for (var x = 0; x < rowsArr.length; x++) {
+      rowsXml += '<Row>';
+      for (var y = 0; y < rowsArr[x].length; y++) {
+        rowsXml += '<Cell><Data ss:Type=\'String\'>' + xmlEsc(rowsArr[x][y]) + '</Data></Cell>';
+      }
+      rowsXml += '</Row>';
+    }
+    return '<Worksheet ss:Name=\'' + xmlEsc(name) + '\'><Table>' + rowsXml + '</Table></Worksheet>';
+  }
+
+  var resultSheetRows = [
+    ['key', 'value'],
+    ['status', result.status],
+    ['pages_found', '' + result.pages_found],
+    ['record_count_ui', '' + result.record_count_ui],
+    ['record_count_extracted', '' + result.record_count_extracted],
+    ['file_name', result.file_name]
+  ];
 
   var xml = '<?xml version=\'1.0\'?>' +
-    '<Workbook xmlns=\'urn:schemas-microsoft-com:office:spreadsheet\' xmlns:ss=\'urn:schemas-microsoft-com:office:spreadsheet\'>' +
-    '<Worksheet ss:Name=\'Matter Data\'><Table>';
-
-  for (var i = 0; i < dataRows.length; i++) {
-    xml += '<Row>';
-    for (var j = 0; j < dataRows[i].length; j++) {
-      xml += '<Cell><Data ss:Type=\'String\'>' + xmlEsc(dataRows[i][j]) + '</Data></Cell>';
-    }
-    xml += '</Row>';
-  }
-  xml += '</Table></Worksheet></Workbook>';
+    '<Workbook xmlns=\'urn:schemas-microsoft-com:office:spreadsheet\' ' +
+    'xmlns:ss=\'urn:schemas-microsoft-com:office:spreadsheet\'>' +
+    buildSheet('Matter data', dataRows) +
+    buildSheet('Result', resultSheetRows) +
+    '</Workbook>';
 
   var blob = new Blob([xml], { type: 'application/vnd.ms-excel' });
   var a = document.createElement('a');
@@ -130,5 +166,6 @@ function () {
   a.click();
   a.remove();
 
-  return fileName;
+  return result.file_name;
 }
+"
