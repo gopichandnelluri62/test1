@@ -1,110 +1,92 @@
-function(element, fileName) {
-    var ROW_SEL    = '.qa-grid-row';
-    var CELL_SEL   = '[data-key]';
-    var HDR_SEL    = '[data-column-key]';
-    var HDR_LABEL  = '.qa-grid-filter-label';
-    var TOT_PAGES  = '.qa-total-grid-pages';
-    var BODY_SEL   = '.qa-grid-body.form-scroll';
+(async function(element, fileName) {
+    /* ================= HELPERS ================= */
+    const txt = (el) => el ? (el.innerText || el.textContent || '').trim() : '';
+    const xmlEsc = (v) => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/'/g, '&apos;');
+    const sleep = (ms) => new Promise(res => setTimeout(res, ms));
 
-    function txt(el) { return el ? (el.innerText || el.textContent || '').trim() : ''; }
-    function xmlEsc(v) {
-        return String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/'/g, '&apos;');
-    }
+    /* ================= SELECTORS ================= */
+    const ROW_SEL    = '.qa-grid-row';
+    const CELL_SEL   = '[data-key]';
+    const HDR_SEL    = '[data-column-key]';
+    const HDR_LABEL  = '.qa-grid-filter-label';
+    const TOT_PAGES  = '.qa-total-grid-pages';
 
-    // 1. Setup Persistent Storage on the window so it doesn't vanish
-    window.scrapingData = [];
-    window.seenIds = new Set();
-    
-    var tElem = document.querySelector(TOT_PAGES);
-    var totalPages = tElem ? parseInt(tElem.textContent, 10) : 1;
-    var currentPage = 1;
+    const tElem = document.querySelector(TOT_PAGES);
+    let totalPages = tElem ? parseInt(tElem.textContent, 10) : 1;
+    if (isNaN(totalPages) || totalPages < 1) totalPages = 1;
 
-    // 2. Initialize Headers
-    var headers = [];
-    var keys = [];
-    var firstRow = document.querySelector(ROW_SEL);
+    /* ================= DATA STORAGE ================= */
+    let dataRows = [];
+    let seenIds = new Set();
+    let keys = [];
+
+    // Initialize Headers
+    const firstRow = document.querySelector(ROW_SEL);
     if (firstRow) {
-        var cs = firstRow.querySelectorAll(CELL_SEL);
-        for (var j = 0; j < cs.length; j++) { keys.push(cs[j].getAttribute('data-key') || ''); }
+        const cs = firstRow.querySelectorAll(CELL_SEL);
+        keys = Array.from(cs).map(c => c.getAttribute('data-key') || '');
     }
-    var hs = document.querySelectorAll(HDR_SEL);
-    for (var h = 0; h < hs.length; h++) {
-        var l = hs[h].querySelector(HDR_LABEL) || hs[h];
-        headers.push(txt(l));
-    }
-    window.scrapingData.push(headers);
+    const hs = document.querySelectorAll(HDR_SEL);
+    const headers = Array.from(hs).map(h => txt(h.querySelector(HDR_LABEL) || h));
+    dataRows.push(headers);
 
-    // 3. The Extraction Logic
-    function scrapeCurrentPage() {
-        var currentRows = document.querySelectorAll(ROW_SEL);
-        currentRows.forEach(function(row) {
-            var rowId = row.getAttribute('data-id') || txt(row);
-            if (!window.seenIds.has(rowId)) {
-                window.seenIds.add(rowId);
-                var vals = [];
-                var cells = row.querySelectorAll(CELL_SEL);
-                for (var c = 0; c < keys.length; c++) {
-                    var el = cells[c] ? (cells[c].querySelector('a,span') || cells[c]) : null;
-                    vals.push(txt(el));
-                }
-                window.scrapingData.push(vals);
+    /* ================= ASYNC ENGINE ================= */
+    for (let p = 0; p < totalPages; p++) {
+        // 1. Scrape current view
+        const rows = document.querySelectorAll(ROW_SEL);
+        rows.forEach(row => {
+            const rowId = row.getAttribute('data-id') || txt(row);
+            if (!seenIds.has(rowId)) {
+                seenIds.add(rowId);
+                const cells = row.querySelectorAll(CELL_SEL);
+                const vals = keys.map((_, i) => {
+                    const el = cells[i] ? (cells[i].querySelector('a,span') || cells[i]) : null;
+                    return txt(el);
+                });
+                dataRows.push(vals);
             }
         });
 
-        if (currentPage < totalPages) {
-            var btn = null;
-            var icons = document.querySelectorAll('i.material-icons');
-            for (var i = 0; i < icons.length; i++) {
-                if (txt(icons[i]) === 'chevron_right') { btn = icons[i].parentNode; break; }
+        // 2. Navigate if not last page
+        if (p < totalPages - 1) {
+            let btn = null;
+            const icons = document.querySelectorAll('i.material-icons');
+            for (let icon of icons) {
+                if (txt(icon) === 'chevron_right') { btn = icon.parentNode; break; }
             }
 
             if (btn) {
-                currentPage++;
                 btn.click();
-                // Wait for the grid body to change, then scrape again
-                waitForChanges();
+                // This 'await' is the key. It pauses the loop but NOT the browser.
+                // We use 4 seconds to be safe for network latency.
+                await sleep(4000); 
             } else {
-                generateFile();
+                break; 
             }
-        } else {
-            generateFile();
         }
     }
 
-    function waitForChanges() {
-        var target = document.querySelector(BODY_SEL);
-        var observer = new MutationObserver(function(mutations, obs) {
-            obs.disconnect(); // Stop watching
-            setTimeout(scrapeCurrentPage, 1000); // Small buffer for rendering
-        });
-        observer.observe(target, { childList: true, subtree: true });
-    }
+    /* ================= EXPORT ================= */
+    let rowsXml = dataRows.map(row => 
+        `<Row>${row.map(val => `<Cell><Data ss:Type='String'>${xmlEsc(val)}</Data></Cell>`).join('')}</Row>`
+    ).join('');
 
-    function generateFile() {
-        var rowsXml = '';
-        window.scrapingData.forEach(function(row) {
-            rowsXml += '<Row>';
-            row.forEach(function(val) {
-                rowsXml += '<Cell><Data ss:Type=\'String\'>' + xmlEsc(val) + '</Data></Cell>';
-            });
-            rowsXml += '</Row>';
-        });
+    const xml = `<?xml version='1.0'?><Workbook xmlns='urn:schemas-microsoft-com:office:spreadsheet' xmlns:ss='urn:schemas-microsoft-com:office:spreadsheet'><Worksheet ss:Name='Data'><Table>${rowsXml}</Table></Worksheet></Workbook>`;
+    
+    const blob = new Blob([xml], { type: 'application/vnd.ms-excel' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    
+    // Cleanup
+    setTimeout(() => {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }, 5000);
 
-        var xml = '<?xml version=\'1.0\'?><Workbook xmlns=\'urn:schemas-microsoft-com:office:spreadsheet\' xmlns:ss=\'urn:schemas-microsoft-com:office:spreadsheet\'><Worksheet ss:Name=\'Data\'><Table>' + rowsXml + '</Table></Worksheet></Workbook>';
-        var blob = new Blob([xml], { type: 'application/vnd.ms-excel' });
-        var a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = fileName;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        
-        // Clean up window object
-        delete window.scrapingData;
-        delete window.seenIds;
-    }
+    console.log("Extraction Finished: " + fileName);
 
-    // Start the chain
-    scrapeCurrentPage();
-    return "Scraper running in background. Please wait for the download.";
-}
+})(null, "ExtractedData.xls"); // Pass your filename here if not using UiPath arguments
