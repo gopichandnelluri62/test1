@@ -1,79 +1,114 @@
 function(element, fileName) {
+  /* ================= HELPERS (Safe Syntax) ================= */
+  var txt = function(el) { return el ? (el.innerText || el.textContent || '').trim() : ''; };
+  var esc = function(v) {
+    return String(v == null ? '' : v)
+      .replace(new RegExp('&', 'g'), '&amp;')
+      .replace(new RegExp('<', 'g'), '&lt;')
+      .replace(new RegExp('>', 'g'), '&gt;')
+      .replace(new RegExp("'", 'g'), '&apos;');
+  };
+
+  /* ================= SELECTORS ================= */
+  var ROW_SEL = '.qa-grid-row';
+  var CELL_SEL = '[data-key]';
+  var TOT_PAGES = '.qa-total-grid-pages';
+
+  var tElem = document.querySelector(TOT_PAGES);
+  var totalPages = tElem ? parseInt(tElem.textContent, 10) : 1;
+  if (isNaN(totalPages) || totalPages < 1) { totalPages = 1; }
+
   var dataRows = [];
   var seen = {};
   var keys = [];
-  var txt = function(el) { return el ? (el.innerText || el.textContent || '').trim() : ''; };
-  var esc = function(v) { return String(v == null ? '' : v).replace(new RegExp('&', 'g'), '&amp;').replace(new RegExp('<', 'g'), '&lt;').replace(new RegExp('>', 'g'), '&gt;').replace(new RegExp("'", 'g'), '&apos;'); };
 
-  var firstRow = document.querySelector('.qa-grid-row');
+  /* ================= 1. CAPTURE HEADERS ================= */
+  var firstRow = document.querySelector(ROW_SEL);
   if (firstRow) {
-    var cs = firstRow.querySelectorAll('[data-key]');
-    for (var j = 0; j < cs.length; j++) { keys.push(cs[j].getAttribute('data-key') || ''); }
+    var cs = firstRow.querySelectorAll(CELL_SEL);
+    for (var j = 0; j < cs.length; j++) { 
+      keys.push(cs[j].getAttribute('data-key') || ''); 
+    }
   }
   var hs = document.querySelectorAll('[data-column-key]');
-  var hVals = [];
-  for (var h = 0; h < hs.length; h++) { hVals.push(txt(hs[h].querySelector('.qa-grid-filter-label') || hs[h])); }
-  dataRows.push(hVals);
+  var headerVals = [];
+  for (var h = 0; h < hs.length; h++) {
+    var label = hs[h].querySelector('.qa-grid-filter-label') || hs[h];
+    headerVals.push(txt(label));
+  }
+  dataRows.push(headerVals);
 
-  var totalPages = (function() {
-    var t = document.querySelector('.qa-total-grid-pages');
-    var v = t ? parseInt(t.textContent, 10) : 1;
-    return isNaN(v) ? 1 : v;
-  })();
+  /* ================= 2. MASTER PAGE LOOP ================= */
+  var lastFirstRowId = '';
 
   for (var p = 0; p < totalPages; p++) {
-    var topBefore = document.querySelector('.qa-grid-row');
-    var idBefore = topBefore ? (topBefore.getAttribute('data-id') || topBefore.innerText) : '';
+    var attempts = 0;
+    var pageActuallyLoaded = false;
 
-    var rows = document.querySelectorAll('.qa-grid-row');
-    for (var r = 0; r < rows.length; r++) {
-      var rId = rows[r].getAttribute('data-id') || (txt(rows[r]) + r);
-      if (seen[rId]) continue;
-      seen[rId] = true;
-      var vals = [];
-      var cells = rows[r].querySelectorAll('[data-key]');
-      for (var c = 0; c < keys.length; c++) {
-        var el = cells[c] ? (cells[c].querySelector('a,span') || cells[c]) : null;
-        vals.push(txt(el));
+    // --- Aggressive Retry: 10 attempts x 15 seconds ---
+    while (attempts < 10) {
+      var currentRows = document.querySelectorAll(ROW_SEL);
+      var currentFirstRowId = currentRows.length > 0 ? (currentRows[0].getAttribute('data-id') || txt(currentRows[0])) : '';
+
+      // Verify we have rows AND they aren't the same as the previous page
+      if (currentRows.length > 0 && currentFirstRowId !== lastFirstRowId) {
+        for (var r = 0; r < currentRows.length; r++) {
+          var rowId = currentRows[r].getAttribute('data-id') || (txt(currentRows[r]) + r);
+          if (seen[rowId]) continue;
+          seen[rowId] = true;
+          
+          var vals = [];
+          var cells = currentRows[r].querySelectorAll(CELL_SEL);
+          for (var c = 0; c < keys.length; c++) {
+            var el = cells[c] ? (cells[c].querySelector('a,span') || cells[c]) : null;
+            vals.push(txt(el));
+          }
+          dataRows.push(vals);
+        }
+        lastFirstRowId = currentFirstRowId;
+        pageActuallyLoaded = true;
+        break; 
+      } else {
+        // No new data yet, block for 15 seconds
+        attempts++;
+        var startWait = new Date().getTime();
+        while (new Date().getTime() < startWait + 15000) { /* Hard Blocking Wait */ }
       }
-      dataRows.push(vals);
     }
 
+    // --- 3. NAVIGATION ---
     if (p < totalPages - 1) {
-      var btn = null;
+      var nextBtn = null;
       var icons = document.querySelectorAll('i.material-icons');
       for (var i = 0; i < icons.length; i++) {
         if (txt(icons[i]) === 'chevron_right') { 
-          btn = icons[i].parentNode; 
+          nextBtn = icons[i].parentNode; 
           break; 
         }
       }
 
-      if (btn) {
-        btn.click();
-        var success = false;
-        for (var attempt = 0; attempt < 10; attempt++) {
-          var start = new Date().getTime();
-          while (new Date().getTime() < start + 15000) { /* 15s BLOCK */ }
-          var topAfter = document.querySelector('.qa-grid-row');
-          var idAfter = topAfter ? (topAfter.getAttribute('data-id') || topAfter.innerText) : '';
-          if (idAfter !== idBefore) { success = true; break; }
-        }
-        if (!success) break; 
-      } else { break; }
+      if (nextBtn) {
+        nextBtn.click();
+        // Mandatory 2s buffer to let the UI start clearing
+        var trans = new Date().getTime();
+        while (new Date().getTime() < trans + 2000) { }
+      } else {
+        break; 
+      }
     }
   }
 
-  var xRows = '';
+  /* ================= 4. FINAL DOWNLOAD ================= */
+  var rowsXml = '';
   for (var x = 0; x < dataRows.length; x++) {
-    xRows += '<Row>';
+    rowsXml += '<Row>';
     for (var y = 0; y < dataRows[x].length; y++) {
-      xRows += '<Cell><Data ss:Type=\'String\'>' + esc(dataRows[x][y]) + '</Data></Cell>';
+      rowsXml += '<Cell><Data ss:Type=\'String\'>' + esc(dataRows[x][y]) + '</Data></Cell>';
     }
-    xRows += '</Row>';
+    rowsXml += '</Row>';
   }
 
-  var xml = '<?xml version=\'1.0\'?><Workbook xmlns=\'urn:schemas-microsoft-com:office:spreadsheet\' xmlns:ss=\'urn:schemas-microsoft-com:office:spreadsheet\'><Worksheet ss:Name=\'Data\'><Table>' + xRows + '</Table></Worksheet></Workbook>';
+  var xml = '<?xml version=\'1.0\'?><Workbook xmlns=\'urn:schemas-microsoft-com:office:spreadsheet\' xmlns:ss=\'urn:schemas-microsoft-com:office:spreadsheet\'><Worksheet ss:Name=\'Data\'><Table>' + rowsXml + '</Table></Worksheet></Workbook>';
   var blob = new Blob([xml], { type: 'application/vnd.ms-excel' });
   var a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
@@ -82,5 +117,5 @@ function(element, fileName) {
   a.click();
   a.remove();
 
-  return 'Success';
+  return 'Success: Captured ' + (dataRows.length - 1) + ' rows.';
 }
