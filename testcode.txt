@@ -1,31 +1,27 @@
 function(element, fileName) {
-    /* ================= SELECTORS ================= */
     var ROW_SEL    = '.qa-grid-row';
     var CELL_SEL   = '[data-key]';
     var HDR_SEL    = '[data-column-key]';
     var HDR_LABEL  = '.qa-grid-filter-label';
     var TOT_PAGES  = '.qa-total-grid-pages';
+    var BODY_SEL   = '.qa-grid-body.form-scroll';
 
-    /* ================= HELPERS ================= */
     function txt(el) { return el ? (el.innerText || el.textContent || '').trim() : ''; }
     function xmlEsc(v) {
         return String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/'/g, '&apos;');
     }
 
-    // Determine Total Pages
+    // 1. Setup Persistent Storage on the window so it doesn't vanish
+    window.scrapingData = [];
+    window.seenIds = new Set();
+    
     var tElem = document.querySelector(TOT_PAGES);
     var totalPages = tElem ? parseInt(tElem.textContent, 10) : 1;
-    if (isNaN(totalPages) || totalPages < 1) totalPages = 1;
+    var currentPage = 1;
 
-    /* ================= STATE ================= */
+    // 2. Initialize Headers
     var headers = [];
     var keys = [];
-    var dataRows = [];
-    var seenIds = new Set();
-    var currentPage = 1;
-    var isWaitingForPage = false;
-
-    // Initialize Headers/Keys from the very first view
     var firstRow = document.querySelector(ROW_SEL);
     if (firstRow) {
         var cs = firstRow.querySelectorAll(CELL_SEL);
@@ -36,35 +32,25 @@ function(element, fileName) {
         var l = hs[h].querySelector(HDR_LABEL) || hs[h];
         headers.push(txt(l));
     }
-    dataRows.push(headers);
+    window.scrapingData.push(headers);
 
-    /* ================= THE PERSISTENT MONITOR ================= */
-    // We use setInterval so the script stays alive in the browser memory
-    var scraperInterval = setInterval(function() {
-        
-        if (isWaitingForPage) return; // Wait if we just clicked 'Next'
-
-        // 1. Scraping Logic
+    // 3. The Extraction Logic
+    function scrapeCurrentPage() {
         var currentRows = document.querySelectorAll(ROW_SEL);
-        var addedInThisTurn = 0;
-
-        for (var r = 0; r < currentRows.length; r++) {
-            var rowId = currentRows[r].getAttribute('data-id') || (txt(currentRows[r]) + r);
-            if (seenIds.has(rowId)) continue;
-            
-            seenIds.add(rowId);
-            addedInThisTurn++;
-
-            var vals = [];
-            var cells = currentRows[r].querySelectorAll(CELL_SEL);
-            for (var c = 0; c < keys.length; c++) {
-                var el = cells[c] ? (cells[c].querySelector('a,span') || cells[c]) : null;
-                vals.push(txt(el));
+        currentRows.forEach(function(row) {
+            var rowId = row.getAttribute('data-id') || txt(row);
+            if (!window.seenIds.has(rowId)) {
+                window.seenIds.add(rowId);
+                var vals = [];
+                var cells = row.querySelectorAll(CELL_SEL);
+                for (var c = 0; c < keys.length; c++) {
+                    var el = cells[c] ? (cells[c].querySelector('a,span') || cells[c]) : null;
+                    vals.push(txt(el));
+                }
+                window.scrapingData.push(vals);
             }
-            dataRows.push(vals);
-        }
+        });
 
-        // 2. Navigation Logic
         if (currentPage < totalPages) {
             var btn = null;
             var icons = document.querySelectorAll('i.material-icons');
@@ -73,37 +59,38 @@ function(element, fileName) {
             }
 
             if (btn) {
-                isWaitingForPage = true;
-                btn.click();
                 currentPage++;
-                
-                // Wait 4 seconds for the grid to refresh before allowing the next scrape
-                setTimeout(function() { isWaitingForPage = false; }, 4000);
+                btn.click();
+                // Wait for the grid body to change, then scrape again
+                waitForChanges();
             } else {
-                finish(); // Button missing, stop early
+                generateFile();
             }
         } else {
-            finish(); // Reached last page
+            generateFile();
         }
+    }
 
-    }, 1000); // Check every 1 second
+    function waitForChanges() {
+        var target = document.querySelector(BODY_SEL);
+        var observer = new MutationObserver(function(mutations, obs) {
+            obs.disconnect(); // Stop watching
+            setTimeout(scrapeCurrentPage, 1000); // Small buffer for rendering
+        });
+        observer.observe(target, { childList: true, subtree: true });
+    }
 
-    function finish() {
-        clearInterval(scraperInterval); // Stop the loop
-
+    function generateFile() {
         var rowsXml = '';
-        for (var x = 0; x < dataRows.length; x++) {
+        window.scrapingData.forEach(function(row) {
             rowsXml += '<Row>';
-            for (var y = 0; y < dataRows[x].length; y++) {
-                rowsXml += '<Cell><Data ss:Type=\'String\'>' + xmlEsc(dataRows[x][y]) + '</Data></Cell>';
-            }
+            row.forEach(function(val) {
+                rowsXml += '<Cell><Data ss:Type=\'String\'>' + xmlEsc(val) + '</Data></Cell>';
+            });
             rowsXml += '</Row>';
-        }
+        });
 
-        var xml = '<?xml version=\'1.0\'?>' +
-            '<Workbook xmlns=\'urn:schemas-microsoft-com:office:spreadsheet\' xmlns:ss=\'urn:schemas-microsoft-com:office:spreadsheet\'>' +
-            '<Worksheet ss:Name=\'Data\'><Table>' + rowsXml + '</Table></Worksheet></Workbook>';
-
+        var xml = '<?xml version=\'1.0\'?><Workbook xmlns=\'urn:schemas-microsoft-com:office:spreadsheet\' xmlns:ss=\'urn:schemas-microsoft-com:office:spreadsheet\'><Worksheet ss:Name=\'Data\'><Table>' + rowsXml + '</Table></Worksheet></Workbook>';
         var blob = new Blob([xml], { type: 'application/vnd.ms-excel' });
         var a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
@@ -111,7 +98,13 @@ function(element, fileName) {
         document.body.appendChild(a);
         a.click();
         a.remove();
+        
+        // Clean up window object
+        delete window.scrapingData;
+        delete window.seenIds;
     }
 
-    return "Scraper initialized. Background process is running.";
+    // Start the chain
+    scrapeCurrentPage();
+    return "Scraper running in background. Please wait for the download.";
 }
