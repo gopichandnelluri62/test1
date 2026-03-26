@@ -1,3 +1,1 @@
-Excel.Sheet(in_Config("LawFirmMatters_FirmMattersSheetName").ToString).Range("A2:Z2")
-
-Excel.Sheet(in_Config("LawFirmMatters_FirmMattersSheetName").ToString).Range("A" & (dtReportData.Rows.Count + 2).ToString & ":Z" & (dtReportData.Rows.Count + 2 + in_ONITReportData.Rows.Count).ToString)
+Excel.Sheet(in_Config("LawFirmMatters_FirmMattersSheetName").ToString).Range("A" & (dtReportData.Rows.Count + 2).ToString & ":Z" & (dtReportData.Rows.Count + 2 + in_ONITReportData.Rows.Count - 1).ToString)
